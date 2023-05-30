@@ -4,9 +4,9 @@ use nannou::prelude::*;
 use image::{RgbImage, Rgb};
 
 const SCALE: f32 = 3.0;
-const HEIGHT: i32 = (150.0 * SCALE) as i32;
-const WIDTH: i32 = (267.0 * SCALE) as i32;
-const BLOCK_SIZE: f32 = 1.0;
+const HEIGHT: usize = (150.0 * SCALE) as usize;
+const WIDTH: usize = (267.0 * SCALE) as usize;
+const BLOCK_SIZE: usize = 1;
 
 struct Model {
     map: Vec<Vec<BlockKind>>,
@@ -29,11 +29,11 @@ enum BlockKind {
     Water
 }
 
-// struct Block {
-//     color: Rgb<u8>,
-//     should_fall: bool,
-//     density: u32,
-// }
+struct Block {
+    color: Rgb<u8>,
+    should_fall: bool,
+    density: u32,
+}
 
 // Block{color: Rgb([194, 178, 128]), should_fall: true; density: 3}
 
@@ -70,10 +70,10 @@ impl BlockKind {
     }
 
     fn draw(&self, x: usize, y: usize, img : &mut image::ImageBuffer<Rgb<u8>, Vec<u8>>) {
-        let x = x as f32;
-        let y = y as f32;
+        let x = x ;
+        let y = y;
 
-        fn put_pixel(x:f32, y:f32, color: Rgb<u8>, img: &mut image::ImageBuffer<Rgb<u8>, Vec<u8>>) {
+        fn put_pixel(x:usize, y:usize, color: Rgb<u8>, img: &mut image::ImageBuffer<Rgb<u8>, Vec<u8>>) {
             for i in 0..(BLOCK_SIZE as u32) {
                 for j in 0..(BLOCK_SIZE as u32) {
                     img.put_pixel((x*BLOCK_SIZE) as u32 + j, (y*BLOCK_SIZE) as u32 + i, color);
@@ -103,7 +103,7 @@ impl BlockKind {
                     BlockKind::Steel {}
                 };
 
-                let block_below_right = if j < (WIDTH - 1) as usize {
+                let block_below_right = if j < WIDTH - 1 {
                     map[i + 1][j + 1]
                 } else {
                     BlockKind::Steel {}
@@ -134,7 +134,7 @@ impl BlockKind {
                     BlockKind::Steel {}
                 };
 
-                let block_below_right = if j < (WIDTH - 1) as usize {
+                let block_below_right = if j < WIDTH - 1 {
                     map[i + 1][j + 1]
                 } else {
                     BlockKind::Steel {}
@@ -148,7 +148,7 @@ impl BlockKind {
                 };
 
                 let block_right =
-                if j < (WIDTH - 1) as usize {
+                if j < WIDTH - 1 {
                     map[i][j + 1]
                 } else {
                      BlockKind::Steel {}
@@ -246,8 +246,8 @@ impl Model {
 
 fn process_mouse(model: &mut Model) {
     if model.pressed {
-        model.map[((-model.current_mouse_position[1] + (HEIGHT as f32/2.0))) as usize]
-                 [((model.current_mouse_position[0] + (WIDTH as f32/2.0))) as usize] = model.current_block_kind;
+        model.map[(-model.current_mouse_position[1] + (HEIGHT as f32/2.0)) as usize]
+                 [(model.current_mouse_position[0] + (WIDTH as f32/2.0)) as usize] = model.current_block_kind;
         // println!(
         //     "added water at x: {} y: {} block x: {} block y: {}",
         //     model.current_mouse_position[0],
@@ -264,12 +264,11 @@ fn main() {
 
 fn model(app: &App) -> Model {
     app.new_window()
-        .size((WIDTH as f32 * BLOCK_SIZE) as u32, (HEIGHT as f32 * BLOCK_SIZE) as u32)
+        .size((WIDTH * BLOCK_SIZE) as u32, (HEIGHT * BLOCK_SIZE) as u32)
         .event(event)
         .view(view)
         .build()
         .unwrap();
-    // app.
     Model::new()
 }
 
@@ -283,7 +282,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     
     
-    let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = RgbImage::new((WIDTH*BLOCK_SIZE as i32) as u32, (HEIGHT*BLOCK_SIZE as i32) as u32);
+    let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = RgbImage::new((WIDTH*BLOCK_SIZE) as u32, (HEIGHT*BLOCK_SIZE) as u32);
     
     // let texture = wgpu::Texture::load_from_image_buffer(app, &img);
     
@@ -322,7 +321,8 @@ fn event(_app: &App, model: &mut Model, event: WindowEvent) {
 
                 // println!("mapped");
                 // model.map[0][50] = BlockKind::Water;
-                model.map[((-model.current_mouse_position[1] + (HEIGHT as f32 * BLOCK_SIZE/2.0)) / BLOCK_SIZE) as usize][((model.current_mouse_position[0] + (WIDTH as f32* BLOCK_SIZE/2.0)) / BLOCK_SIZE) as usize] = model.current_block_kind;
+                model.map[(-model.current_mouse_position[1] + (HEIGHT as f32/2.0)) as usize]
+                         [(model.current_mouse_position[0] + (WIDTH as f32/2.0)) as usize] = model.current_block_kind;
             }
         }
         MousePressed(_button) => {
