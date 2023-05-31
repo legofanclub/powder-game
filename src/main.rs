@@ -1,12 +1,14 @@
 use fps_counter::FPSCounter;
-use nannou::image::{DynamicImage, self};
+use image::{Rgb, RgbImage};
+use nannou::image::{self, DynamicImage};
 use nannou::prelude::*;
-use image::{RgbImage, Rgb};
 
 const SCALE: f32 = 3.0;
 const HEIGHT: usize = (150.0 * SCALE) as usize;
 const WIDTH: usize = (267.0 * SCALE) as usize;
 const BLOCK_SIZE: usize = 1;
+const ACCELERATION_DUE_TO_GRAVITY: i32 = 1;
+const GRAVITY_DIRECTION_VECTOR: (i32, i32) = (0, -1);
 
 struct Model {
     map: Vec<Vec<BlockKind>>,
@@ -15,7 +17,7 @@ struct Model {
     frame_parity: bool,
     current_block_kind: BlockKind,
     fps: FPSCounter,
-    fps_result: usize
+    fps_result: usize,
 }
 
 use nannou::rand;
@@ -23,70 +25,98 @@ use nannou::rand;
 #[derive(Clone, Copy)]
 enum BlockKind {
     Empty,
-    Concrete,
-    Steel,
-    Sand,
-    Water
+    Concrete(Block),
+    Steel(Block),
+    Sand(Block),
+    Water(Block),
 }
 
+#[derive(Clone, Copy)]
 struct Block {
-    color: Rgb<u8>,
-    should_fall: bool,
-    density: u32,
+    velocity_x: i32,
+    velocity_y: i32,
+    life_time: f32,
 }
+
+impl Block {
+    fn new() -> Self {
+        Block {
+            velocity_x: 0,
+            velocity_y: 0,
+            life_time: -1.0,
+        }
+    }
+}
+
+// impl BlockKind::Concrete {
+//     const MY_STATIC: i32 = 123  ;
+// }
 
 // Block{color: Rgb([194, 178, 128]), should_fall: true; density: 3}
-
 
 impl BlockKind {
     fn should_fall(&self) -> bool {
         match self {
-            BlockKind::Concrete {} => true,
-            BlockKind::Steel {} => false,
-            BlockKind::Sand {} => true,
-            BlockKind::Water {} => true,
+            BlockKind::Concrete(_) => true,
+            BlockKind::Steel(_) => false,
+            BlockKind::Sand(_) => true,
+            BlockKind::Water(_) => true,
             _ => false,
         }
     }
 
     fn density(&self) -> i32 {
         match self {
-            BlockKind::Concrete {} => 4,
-            BlockKind::Steel {} => 5,
-            BlockKind::Sand {} => 3,
-            BlockKind::Water {} => 2,
+            BlockKind::Concrete(_) => 4,
+            BlockKind::Steel(_) => 5,
+            BlockKind::Sand(_) => 3,
+            BlockKind::Water(_) => 2,
             _ => 0,
         }
     }
 
     fn color(&self) -> Rgb<u8> {
         match self {
-            BlockKind::Concrete {} => Rgb([90, 90, 90]),
-            BlockKind::Steel {} => Rgb([208, 212, 214]),
-            BlockKind::Sand {} => Rgb([194, 178, 128]),
-            BlockKind::Water {} => Rgb([0, 0, 255]),
-            _ => Rgb([0,0,0]),
+            BlockKind::Concrete(_) => Rgb([90, 90, 90]),
+            BlockKind::Steel(_) => Rgb([208, 212, 214]),
+            BlockKind::Sand(_) => Rgb([194, 178, 128]),
+            BlockKind::Water(_) => Rgb([0, 0, 255]),
+            _ => Rgb([0, 0, 0]),
         }
     }
 
-    fn draw(&self, x: usize, y: usize, img : &mut image::ImageBuffer<Rgb<u8>, Vec<u8>>) {
-        let x = x ;
+    fn draw(&self, x: usize, y: usize, img: &mut image::ImageBuffer<Rgb<u8>, Vec<u8>>) {
+        let x = x;
         let y = y;
 
-        fn put_pixel(x:usize, y:usize, color: Rgb<u8>, img: &mut image::ImageBuffer<Rgb<u8>, Vec<u8>>) {
+        fn put_pixel(
+            x: usize,
+            y: usize,
+            color: Rgb<u8>,
+            img: &mut image::ImageBuffer<Rgb<u8>, Vec<u8>>,
+        ) {
             for i in 0..(BLOCK_SIZE as u32) {
                 for j in 0..(BLOCK_SIZE as u32) {
-                    img.put_pixel((x*BLOCK_SIZE) as u32 + j, (y*BLOCK_SIZE) as u32 + i, color);
+                    img.put_pixel(
+                        (x * BLOCK_SIZE) as u32 + j,
+                        (y * BLOCK_SIZE) as u32 + i,
+                        color,
+                    );
                 }
             }
         }
 
-        put_pixel(x,y, self.color(), img);
+        put_pixel(x, y, self.color(), img);
     }
 
     fn update(&self, map: &mut [Vec<BlockKind>], j: usize, i: usize, frame_parity: bool) {
+        self.update_block_velocity(map, i, j);
+        self.move_block(map, i, j, frame_parity);
+    }
+
+    fn move_block(&self, map: &mut [Vec<BlockKind>], i: usize, j: usize, frame_parity: bool) {
         match self {
-            BlockKind::Concrete {} | BlockKind::Steel {} => {
+            BlockKind::Concrete(_) | BlockKind::Steel(_) => {
                 let block_below = map[i + 1][j];
 
                 if self.should_fall() && self.density() > block_below.density() {
@@ -95,18 +125,18 @@ impl BlockKind {
                     map[i + 1][j] = temp;
                 }
             }
-            BlockKind::Sand {} => {
+            BlockKind::Sand(_) => {
                 let block_below = map[i + 1][j];
                 let block_below_left = if j > 0 {
                     map[i + 1][j - 1]
                 } else {
-                    BlockKind::Steel {}
+                    BlockKind::Steel(Block::new())
                 };
 
                 let block_below_right = if j < WIDTH - 1 {
                     map[i + 1][j + 1]
                 } else {
-                    BlockKind::Steel {}
+                    BlockKind::Steel(Block::new())
                 };
 
                 if self.should_fall() && self.density() > block_below.density() {
@@ -126,32 +156,30 @@ impl BlockKind {
                     map[i + 1][j + 1] = temp;
                 }
             }
-            BlockKind::Water {} => {
+            BlockKind::Water(_) => {
                 let block_below = map[i + 1][j];
                 let block_below_left = if j > 0 {
                     map[i + 1][j - 1]
                 } else {
-                    BlockKind::Steel {}
+                    BlockKind::Steel(Block::new())
                 };
 
                 let block_below_right = if j < WIDTH - 1 {
                     map[i + 1][j + 1]
                 } else {
-                    BlockKind::Steel {}
+                    BlockKind::Steel(Block::new())
                 };
 
-                let block_left =
-                if j > 0 {
+                let block_left = if j > 0 {
                     map[i][j - 1]
                 } else {
-                    BlockKind::Steel {}
+                    BlockKind::Steel(Block::new())
                 };
 
-                let block_right =
-                if j < WIDTH - 1 {
+                let block_right = if j < WIDTH - 1 {
                     map[i][j + 1]
                 } else {
-                     BlockKind::Steel {}
+                    BlockKind::Steel(Block::new())
                 };
 
                 if self.should_fall() && self.density() > block_below.density() {
@@ -164,20 +192,23 @@ impl BlockKind {
                     let temp = map[i][j];
                     map[i][j] = block_below_left;
                     map[i + 1][j - 1] = temp;
-                }
-                else if self.should_fall() && self.density() > block_below_right.density() {
+                } else if self.should_fall() && self.density() > block_below_right.density() {
                     // fall down right
                     let temp = map[i][j];
                     map[i][j] = block_below_right;
                     map[i + 1][j + 1] = temp;
-                }
-                else if self.should_fall() && self.density() > block_left.density() && frame_parity {
+                } else if self.should_fall()
+                    && self.density() > block_left.density()
+                    && frame_parity
+                {
                     // move left
                     let temp = map[i][j];
                     map[i][j] = block_left;
                     map[i][j - 1] = temp;
-                }
-                else if self.should_fall() && self.density() > block_right.density() && !frame_parity {
+                } else if self.should_fall()
+                    && self.density() > block_right.density()
+                    && !frame_parity
+                {
                     // move right
                     let temp = map[i][j];
                     map[i][j] = block_right;
@@ -186,6 +217,10 @@ impl BlockKind {
             }
             _ => {}
         }
+    }
+
+    fn update_block_velocity(&self, map: &mut [Vec<BlockKind>], i: usize, j: usize) {
+        todo!()
     }
 }
 
@@ -197,16 +232,16 @@ impl Model {
             for _ in 0..WIDTH {
                 match (rand::random::<f32>() * 100.0) as i32 {
                     0..=15 => {
-                        inner.push(BlockKind::Concrete);
+                        inner.push(BlockKind::Concrete(Block::new()));
                     }
                     40..=40 => {
-                        inner.push(BlockKind::Steel);
+                        inner.push(BlockKind::Steel(Block::new()));
                     }
                     50..=64 => {
-                        inner.push(BlockKind::Sand);
+                        inner.push(BlockKind::Sand(Block::new()));
                     }
                     65..=80 => {
-                        inner.push(BlockKind::Water);
+                        inner.push(BlockKind::Water(Block::new()));
                     }
                     _ => {
                         inner.push(BlockKind::Empty);
@@ -215,15 +250,16 @@ impl Model {
             }
             outer.push(inner);
         }
-    outer}
+        outer
+    }
 
-    fn new() -> Self {    
+    fn new() -> Self {
         Self {
             map: Self::new_map(),
             pressed: false,
             current_mouse_position: vec2(0.0, 0.0),
             frame_parity: false,
-            current_block_kind: BlockKind::Sand,
+            current_block_kind: BlockKind::Sand(Block::new()),
             fps: FPSCounter::new(),
             fps_result: 0,
         }
@@ -246,8 +282,9 @@ impl Model {
 
 fn process_mouse(model: &mut Model) {
     if model.pressed {
-        model.map[(-model.current_mouse_position[1] + (HEIGHT as f32/2.0)) as usize]
-                 [(model.current_mouse_position[0] + (WIDTH as f32/2.0)) as usize] = model.current_block_kind;
+        model.map[(-model.current_mouse_position[1] + (HEIGHT as f32 / 2.0)) as usize]
+            [(model.current_mouse_position[0] + (WIDTH as f32 / 2.0)) as usize] =
+            model.current_block_kind;
         // println!(
         //     "added water at x: {} y: {} block x: {} block y: {}",
         //     model.current_mouse_position[0],
@@ -280,18 +317,17 @@ fn view(app: &App, model: &Model, frame: Frame) {
     frame.clear(PLUM);
     let draw = app.draw();
 
-    
-    
-    let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = RgbImage::new((WIDTH*BLOCK_SIZE) as u32, (HEIGHT*BLOCK_SIZE) as u32);
-    
+    let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> =
+        RgbImage::new((WIDTH * BLOCK_SIZE) as u32, (HEIGHT * BLOCK_SIZE) as u32);
+
     // let texture = wgpu::Texture::load_from_image_buffer(app, &img);
-    
+
     for (i, row) in model.map.iter().enumerate() {
         for (j, block) in row.iter().enumerate() {
-            block.draw(j,i,&mut img);
+            block.draw(j, i, &mut img);
         }
     }
-    
+
     let texture = wgpu::Texture::from_image(app, &DynamicImage::ImageRgb8(img));
     draw.texture(&texture);
     draw.text(model.fps_result.to_string().as_str());
@@ -302,7 +338,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 // mouse movement here.
 fn event(_app: &App, model: &mut Model, event: WindowEvent) {
     // Print events as they occur to the console
-    
+
     // We can `match` on the event to do something different depending on the kind of event.
     match event {
         // Keyboard events
@@ -311,7 +347,7 @@ fn event(_app: &App, model: &mut Model, event: WindowEvent) {
         }
         KeyReleased(_key) => {}
         ReceivedCharacter(_char) => {}
-        
+
         // Mouse events
         MouseMoved(pos) => {
             // println!("{:?}", event);
@@ -321,8 +357,9 @@ fn event(_app: &App, model: &mut Model, event: WindowEvent) {
 
                 // println!("mapped");
                 // model.map[0][50] = BlockKind::Water;
-                model.map[(-model.current_mouse_position[1] + (HEIGHT as f32/2.0)) as usize]
-                         [(model.current_mouse_position[0] + (WIDTH as f32/2.0)) as usize] = model.current_block_kind;
+                model.map[(-model.current_mouse_position[1] + (HEIGHT as f32 / 2.0)) as usize]
+                    [(model.current_mouse_position[0] + (WIDTH as f32 / 2.0)) as usize] =
+                    model.current_block_kind;
             }
         }
         MousePressed(_button) => {
