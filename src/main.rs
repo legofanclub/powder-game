@@ -1,3 +1,6 @@
+use std::iter::Rev;
+use std::ops::{Range, RangeInclusive};
+
 use fps_counter::FPSCounter;
 use image::{Rgb, RgbImage};
 use nannou::image::{self, DynamicImage};
@@ -12,7 +15,7 @@ const WIDTH: u32 = (GRID_WIDTH*BLOCK_SIZE) as u32;
 
 const PAINTBRUSH_SIZE: u32 = 5;
 
-const ACCELERATION_DUE_TO_GRAVITY: i8 = 1;
+const ACCELERATION_DUE_TO_GRAVITY: i8 = 3;
 // const GRAVITY_DIRECTION_VECTOR: (i32, i32) = (0, -1);
 
 struct Model {
@@ -75,8 +78,8 @@ impl Block {
             self.velocity_y += ACCELERATION_DUE_TO_GRAVITY;
         }
 
-        if Block::get_cell(map, x, y+1).is_none() || Block::get_cell(map, x, y+1).unwrap().is_some(){
-            self.velocity_y = 1;
+        if Block::get_cell(map, x, y+1).is_none() {
+            self.velocity_y = 0;
         }
     }
 
@@ -90,18 +93,93 @@ impl Block {
     }
     
     fn try_to_fall(map: &mut [Vec<Option<Block>>], (x_new, y_new): (usize, usize), current_block: &Block, (current_x, current_y): (usize, usize)) -> bool {
-        let new_cell = Block::get_cell(map, x_new, y_new);
-        match new_cell {
-            None => false,
-            Some(cell) => {
-                if cell.is_none() || cell.unwrap().block_kind.density() < current_block.block_kind.density() {
-                    // fall down
-                    Block::swap_cells(map, (current_x,current_y), (x_new, y_new));
-                    true
-                } else {
-                    false
+
+        let x_diff = x_new as i32 - current_x as i32;
+        let y_diff = y_new as i32 - current_y as i32;
+
+        // want to loop through from current y to current y + the difference (eg. all the way to y_new)
+        // problem: if difference is negative, we're iterating over (eg. 50..45) which doesn't run
+
+        // thanks SO! https://stackoverflow.com/a/34375741
+        #[derive(Clone)]
+        enum It {
+            Upwards(RangeInclusive<i32>),
+            Downwards(Rev<RangeInclusive<i32>>),
+        }
+
+        // thanks SO! https://stackoverflow.com/a/34375741
+        impl Iterator for It {
+            type Item = i32;
+        
+            fn next(&mut self) -> Option<Self::Item> {
+                match *self {
+                    It::Upwards(ref mut i) => i.next(),
+                    It::Downwards(ref mut i) => i.next(),
                 }
             }
+        }
+
+        // thanks SO! https://stackoverflow.com/a/34375741
+        // might be an off by 1 bug in the iterators
+        let it_y = if y_diff > 0 {
+            It::Upwards((current_y + 1 ) as i32..=current_y as i32+y_diff)
+        } else if y_diff < 0 {
+            It::Downwards(((current_y - 1) as i32+y_diff..=(current_y ) as i32).rev())
+        } else {
+            It::Upwards(current_y as i32..=current_y as i32)
+        };
+        
+        // might be an off by 1 bug in the iterators
+        let it_x = if x_diff > 0 {
+            It::Upwards((current_x + 1) as i32..=current_x as i32+x_diff)
+        } else if x_diff < 0{
+            It::Downwards(((current_x - 1) as i32+x_diff..=(current_x ) as i32).rev())
+        } else {
+            It::Upwards(current_x as i32..=current_x as i32)
+        };
+
+
+        let mut best_option: Option<(usize, usize)> = None;
+
+        if x_diff > 0 && y_diff > 0 {
+            // diagonal move by one
+            // normal old fall
+        } else if x_diff > 0 {
+            for proposed_x in it_x {
+                let new_cell = Block::get_cell(map, proposed_x as usize, current_y);
+                match new_cell {
+                        None => {  } // out of bounds
+                        Some(cell) => {
+                            if cell.is_none() || cell.unwrap().block_kind.density() < current_block.block_kind.density() {
+                                best_option = Some((proposed_x as usize, current_y as usize));
+                            } else if cell.is_some() && cell.unwrap().block_kind.density() >= current_block.block_kind.density() {
+                                break
+                            }
+                        }
+                    }
+            }
+        } else if y_diff > 0 {
+            for proposed_y in it_y{
+                let new_cell = Block::get_cell(map, current_x, proposed_y as usize);
+                match new_cell {
+                        None => {  } // out of bounds
+                        Some(cell) => {
+                            if cell.is_none() || cell.unwrap().block_kind.density() < current_block.block_kind.density() {
+                                best_option = Some((current_x, proposed_y as usize));
+                            } else if cell.is_some() && cell.unwrap().block_kind.density() >= current_block.block_kind.density() {
+                                break
+                            }
+                        }
+            }
+        }
+        }
+
+        match best_option {
+            Some(best_option) => {
+                Block::swap_cells(map, (current_x,current_y), best_option);
+                true
+            },
+            None => {false}
         }
     }
 
@@ -114,12 +192,12 @@ impl Block {
     fn move_block(&self, map: &mut [Vec<Option<Block>>], y: usize, x: usize, frame_parity: bool) {
         match self.block_kind {
             BlockKind::Concrete => {
-                for new_tup in [(x,y+1)] {
-                    match Block::try_to_fall(map, new_tup, self, (x,y)) {
-                        true => break,
-                        false => {},
-                    }
-                } 
+                // for new_tup in [(x,y+1)] {
+                //     match Block::try_to_fall(map, new_tup, self, (x,y)) {
+                //         true => break,
+                //         false => {},
+                //     }
+                // } 
             }
             BlockKind::Sand => {
                 // problem: have 3 potential spots
@@ -131,36 +209,55 @@ impl Block {
                 // if l_b is available -> try to move block there (will move if empty or if density is appropriate) else move on to checking the next blocks
 
                 // alternate option (could work if we only used the tuple notation (x,y))
+
+                // should all have the same functions but have different slide values or should they call different functions 
+                // if try_falling_down() {
+                //     return
+                // } else if try_short_diagonals() {
+                //     return
+                // } else if try_slide(){
+                //     return
+                // }
                 
-                let places_to_fall = if frame_parity {
-                    [(x,y+1),(x-1,y+1),(x+1,y+1)]
-                } else {
-                    [(x,y+1),(x+1,y+1),(x-1,y+1)]   
-                };
+                
+                match Block::try_to_fall(map, (x,(y+self.velocity_y as usize)), self, (x,y)) {
+                    true => return(),
+                    false => {},
+                }
+                match Block::try_to_fall(map, (x+1,(y as usize + 1)), self, (x,y)) {
+                    true => {
+                        return()},
+                    false => {
+                        // this block is getting run a lot when the true block should be getting run
+                    },
+                }
+                match Block::try_to_fall(map, (x-1,(y as usize + 1)), self, (x,y)) {
+                    true => return(),
+                    false => {},
+                }
 
                 // calculate desired next positions by taking the possible next directions and multiplying them by the current velocity
-                let desired_next_positions = places_to_fall.map(|(x,y)| (x + self.velocity_x as usize, y+ self.velocity_y as usize));
-                for new_tup in desired_next_positions {
-                    match Block::try_to_fall(map, new_tup, self, (x,y)) {
-                        true => break,
-                        false => {},
-                    }
-                }           
+                // for new_tup in desired_next_positions {
+                //     match Block::try_to_fall(map, new_tup, self, (x,y)) {
+                //         true => break,
+                //         false => {},
+                //     }
+                // }           
             }
             BlockKind::Water => {
-                let places_to_fall = if frame_parity {
-                    [(x,y+1),(x-1,y+1),(x+1,y+1),(x+1,y),(x-1,y)]
-                } else {
-                    [(x,y+1),(x+1,y+1),(x-1,y+1),(x-1*self.block_kind.sliding_speed()as usize,y),(x+1*self.block_kind.sliding_speed()as usize,y)]
-                };
+                // let places_to_fall = if frame_parity {
+                //     [(x,y+1),(x-1,y+1),(x+1,y+1),(x+1,y),(x-1,y)]
+                // } else {
+                //     [(x,y+1),(x+1,y+1),(x-1,y+1),(x-1*self.block_kind.sliding_speed()as usize,y),(x+1*self.block_kind.sliding_speed()as usize,y)]
+                // };
                 
-                let desired_next_positions = places_to_fall.map(|(x,y)| (x + self.velocity_x as usize, y+ self.velocity_y as usize));
-                for new_tup in desired_next_positions {
-                    match Block::try_to_fall(map, new_tup, self, (x,y)) {
-                        true => break,
-                        false => {},
-                    }
-                }           
+                // let desired_next_positions = places_to_fall.map(|(x,y)| (x + self.velocity_x as usize, y+ self.velocity_y as usize));
+                // for new_tup in desired_next_positions {
+                //     match Block::try_to_fall(map, new_tup, self, (x,y)) {
+                //         true => break,
+                //         false => {},
+                //     }
+                // }           
             }
             _ => {}
         }
