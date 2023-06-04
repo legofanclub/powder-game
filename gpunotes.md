@@ -1,1 +1,0 @@
-a texture is an image that resides in gpu memory
