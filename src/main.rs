@@ -1,11 +1,9 @@
-use core::panic;
-use std::iter::Rev;
-use std::ops::{Range, RangeInclusive};
-use std::thread::current;
-
+use std::f32::consts::PI;
 use fps_counter::FPSCounter;
 use image::{Rgb, RgbImage};
 use nannou::image::{self, DynamicImage};
+use nannou::prelude::{vec2, Update, PLUM, WHITE, WindowEvent};
+use nannou::{rand, App, Frame, wgpu, Draw};
 use nannou::prelude::*;
 
 const SCALE: f32 = 2.0;
@@ -15,20 +13,17 @@ const BLOCK_SIZE: usize = 2;
 const HEIGHT: u32 = (GRID_HEIGHT * BLOCK_SIZE) as u32;
 const WIDTH: u32 = (GRID_WIDTH * BLOCK_SIZE) as u32;
 
-const UP: (i8, i8) = (0, -1);
+// const UP: (i8, i8) = (0, -1);
 const DOWN: (i8, i8) = (0, 1);
 const LEFT: (i8, i8) = (-1, 0);
 const RIGHT: (i8, i8) = (1, 0);
-const UP_LEFT: (i8, i8) = (-1, -1);
-const UP_RIGHT: (i8, i8) = (1, -1);
+// const UP_LEFT: (i8, i8) = (-1, -1);
+// const UP_RIGHT: (i8, i8) = (1, -1);
 const DOWN_LEFT: (i8, i8) = (-1, 1);
 const DOWN_RIGHT: (i8, i8) = (1, 1);
 
-
 const PAINTBRUSH_SIZE: u32 = 5;
-
 const ACCELERATION_DUE_TO_GRAVITY: i8 = 5;
-// const GRAVITY_DIRECTION_VECTOR: (i32, i32) = (0, -1);
 
 struct Model {
     map: Vec<Vec<Option<Block>>>,
@@ -41,14 +36,7 @@ struct Model {
     fps_result: usize,
 }
 
-use nannou::rand;
-
-#[derive(Clone, Copy, PartialEq)]
-// enum Option {
-//     Empty,
-//     Filled(Block),
-// }
-
+#[derive(Clone, Copy)]
 struct Block {
     block_kind: BlockKind,
     velocity_x: i8,
@@ -64,6 +52,7 @@ enum BlockKind {
     Water,
 }
 
+
 impl Block {
     fn new(block_kind: BlockKind) -> Self {
         Block {
@@ -74,8 +63,6 @@ impl Block {
         }
     }
 }
-
-// Block{color: Rgb([194, 178, 128]), should_fall: true; density: 3}
 
 impl Block {
     fn update(&mut self, map: &mut [Vec<Option<Block>>], x: usize, y: usize, frame_parity: bool) {
@@ -102,29 +89,6 @@ impl Block {
         }
     }
 
-    fn try_to_fall_one_diagonal(
-        map: &mut [Vec<Option<Block>>],
-        (x_new, y_new): (usize, usize),
-        current_block: &Block,
-        (current_x, current_y): (usize, usize),
-    ) -> bool {
-        let new_cell = Block::get_cell(map, x_new, y_new);
-        match new_cell {
-            None => false,
-            Some(cell) => {
-                if cell.is_none()
-                    || cell.unwrap().block_kind.density() < current_block.block_kind.density()
-                {
-                    // fall down
-                    Block::swap_cells(map, (current_x, current_y), (x_new, y_new));
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-    }
-
     fn swap_cells(
         map: &mut [Vec<Option<Block>>],
         (x_1, y_1): (usize, usize),
@@ -141,8 +105,6 @@ impl Block {
                 if !Self::velocity_based_move(self, map, y, x, frame_parity) {
                     // make a simple move if the velocity based move doesn't change the position of the block
                     Self::simple_rules_move(&self, map, (x,y), frame_parity);
-                    // let up_or_side_moves = self.block_kind.directions_to_fall().iter().map(|v| v.iter().filter(|(x,y)| *x == 0 || *y == 0));
-
                 }
             }
         }
@@ -190,14 +152,13 @@ impl Block {
 
     fn velocity_based_move(&self, map: &mut [Vec<Option<Block>>], y: usize, x: usize, frame_parity: bool) -> bool {
         let desired_position = (x + self.velocity_x as usize, y + self.velocity_y as usize);
-        return(self.long_move(map, (x, y), desired_position));
+        return self.long_move(map, (x, y), desired_position);
     }
 
     fn long_move(&self, map: &mut [Vec<Option<Block>>], current_position: (usize, usize), desired_position: (usize, usize)) -> bool{
         let mut best_position = None;
 
-        for position in Self::get_positions_iterator(current_position, desired_position){ // use an iterator to generate this positions? (eg. next closest position)
-            // position_iterator(current, desired);
+        for position in Self::get_positions_iterator(current_position, desired_position){
             if position_is_empty(position, map){
                 best_position = Some(position);
             } else {
@@ -218,9 +179,9 @@ impl Block {
         
         for mut move_group in self.block_kind.directions_to_fall() {
             // 'randomize' order of move group
-            if frame_parity {
-                move_group.reverse();
-            }
+            // if frame_parity {
+                // move_group.reverse();
+            // }
 
             for direction in move_group {
                 if Self::try_simple_move(&self, map, direction,  (x,y)) {
@@ -308,7 +269,6 @@ impl BlockKind {
             BlockKind::Steel => 5,
             BlockKind::Sand => 3,
             BlockKind::Water => 2,
-            // _ => 0,
         }
     }
 
@@ -349,18 +309,18 @@ impl Model {
             let mut inner = Vec::new();
             for _ in 0..GRID_WIDTH {
                 match (rand::random::<f32>() * 100.0) as i32 {
-                    // 0..=15 => {
-                    //     inner.push(Some(Block::new(BlockKind::Concrete)));
-                    // }
-                    // 40..=40 => {
-                    //     inner.push(Some(Block::new(BlockKind::Steel)));
-                    // }
-                    // 50..=64 => {
-                    //     inner.push(Some(Block::new(BlockKind::Sand)));
-                    // }
-                    // 65..=80 => {
-                    //     inner.push(Some(Block::new(BlockKind::Water)));
-                    // }
+                    0..=15 => {
+                        inner.push(Some(Block::new(BlockKind::Concrete)));
+                    }
+                    40..=40 => {
+                        inner.push(Some(Block::new(BlockKind::Steel)));
+                    }
+                    50..=64 => {
+                        inner.push(Some(Block::new(BlockKind::Sand)));
+                    }
+                    65..=80 => {
+                        inner.push(Some(Block::new(BlockKind::Water)));
+                    }
                     _ => {
                         inner.push(None);
                     }
@@ -424,7 +384,6 @@ fn process_mouse(model: &mut Model) {
 
 fn brush(model: &mut Model, kind: BlockKind) {
     let size: u32 = PAINTBRUSH_SIZE;
-    // let size = 1;
     for r in 0..size {
         for i in 0..720 {
             let x = r as f32 * (i as f32 * PI / 360.0).cos();
