@@ -309,18 +309,18 @@ impl Model {
             let mut inner = Vec::new();
             for _ in 0..GRID_WIDTH {
                 match (rand::random::<f32>() * 100.0) as i32 {
-                    0..=15 => {
-                        inner.push(Some(Block::new(BlockKind::Concrete)));
-                    }
-                    40..=40 => {
-                        inner.push(Some(Block::new(BlockKind::Steel)));
-                    }
-                    50..=64 => {
-                        inner.push(Some(Block::new(BlockKind::Sand)));
-                    }
-                    65..=80 => {
-                        inner.push(Some(Block::new(BlockKind::Water)));
-                    }
+                    // 0..=15 => {
+                    //     inner.push(Some(Block::new(BlockKind::Concrete)));
+                    // }
+                    // 40..=40 => {
+                    //     inner.push(Some(Block::new(BlockKind::Steel)));
+                    // }
+                    // 50..=64 => {
+                    //     inner.push(Some(Block::new(BlockKind::Sand)));
+                    // }
+                    // 65..=80 => {
+                    //     inner.push(Some(Block::new(BlockKind::Water)));
+                    // }
                     _ => {
                         inner.push(None);
                     }
