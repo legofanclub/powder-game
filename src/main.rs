@@ -1,8 +1,3 @@
-use core::panic;
-use std::iter::Rev;
-use std::ops::{Range, RangeInclusive};
-use std::thread::current;
-
 use fps_counter::FPSCounter;
 use image::{Rgb, RgbImage};
 use nannou::image::{self, DynamicImage};
@@ -15,12 +10,12 @@ const BLOCK_SIZE: usize = 2;
 const HEIGHT: u32 = (GRID_HEIGHT * BLOCK_SIZE) as u32;
 const WIDTH: u32 = (GRID_WIDTH * BLOCK_SIZE) as u32;
 
-const UP: (i8, i8) = (0, -1);
+// const UP: (i8, i8) = (0, -1);
 const DOWN: (i8, i8) = (0, 1);
 const LEFT: (i8, i8) = (-1, 0);
 const RIGHT: (i8, i8) = (1, 0);
-const UP_LEFT: (i8, i8) = (-1, -1);
-const UP_RIGHT: (i8, i8) = (1, -1);
+// const UP_LEFT: (i8, i8) = (-1, -1);
+// const UP_RIGHT: (i8, i8) = (1, -1);
 const DOWN_LEFT: (i8, i8) = (-1, 1);
 const DOWN_RIGHT: (i8, i8) = (1, 1);
 
@@ -28,7 +23,6 @@ const DOWN_RIGHT: (i8, i8) = (1, 1);
 const PAINTBRUSH_SIZE: u32 = 5;
 
 const ACCELERATION_DUE_TO_GRAVITY: i8 = 5;
-// const GRAVITY_DIRECTION_VECTOR: (i32, i32) = (0, -1);
 
 struct Model {
     map: Vec<Vec<Option<Block>>>,
@@ -36,7 +30,6 @@ struct Model {
     pressed_right: bool,
     current_mouse_position: Vec2,
     frame_parity: bool,
-    current_block_kind: Option<Block>,
     fps: FPSCounter,
     fps_result: usize,
 }
@@ -44,11 +37,6 @@ struct Model {
 use nannou::rand;
 
 #[derive(Clone, Copy, PartialEq)]
-// enum Option {
-//     Empty,
-//     Filled(Block),
-// }
-
 struct Block {
     block_kind: BlockKind,
     velocity_x: i8,
@@ -75,8 +63,6 @@ impl Block {
     }
 }
 
-// Block{color: Rgb([194, 178, 128]), should_fall: true; density: 3}
-
 impl Block {
     fn update(&mut self, map: &mut [Vec<Option<Block>>], x: usize, y: usize, frame_parity: bool) {
         self.update_block_velocity(map, y, x);
@@ -102,29 +88,6 @@ impl Block {
         }
     }
 
-    fn try_to_fall_one_diagonal(
-        map: &mut [Vec<Option<Block>>],
-        (x_new, y_new): (usize, usize),
-        current_block: &Block,
-        (current_x, current_y): (usize, usize),
-    ) -> bool {
-        let new_cell = Block::get_cell(map, x_new, y_new);
-        match new_cell {
-            None => false,
-            Some(cell) => {
-                if cell.is_none()
-                    || cell.unwrap().block_kind.density() < current_block.block_kind.density()
-                {
-                    // fall down
-                    Block::swap_cells(map, (current_x, current_y), (x_new, y_new));
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-    }
-
     fn swap_cells(
         map: &mut [Vec<Option<Block>>],
         (x_1, y_1): (usize, usize),
@@ -136,20 +99,16 @@ impl Block {
     }
 
     fn move_block(&self, map: &mut [Vec<Option<Block>>], y: usize, x: usize, frame_parity: bool) {
-        match self.block_kind {
-            _ => {
-                if !Self::velocity_based_move(self, map, y, x, frame_parity) {
-                    // make a simple move if the velocity based move doesn't change the position of the block
-                    Self::simple_rules_move(&self, map, (x,y), frame_parity);
-                    // let up_or_side_moves = self.block_kind.directions_to_fall().iter().map(|v| v.iter().filter(|(x,y)| *x == 0 || *y == 0));
+        if !Self::velocity_based_move(self, map, y, x, frame_parity) {
+            // make a simple move if the velocity based move doesn't change the position of the block
+            Self::simple_rules_move(self, map, (x,y), frame_parity);
+            // let up_or_side_moves = self.block_kind.directions_to_fall().iter().map(|v| v.iter().filter(|(x,y)| *x == 0 || *y == 0));
 
-                }
-            }
         }
     }
 
     // could return an iterator for performance gains
-    fn get_positions_iterator(start: (usize, usize), end: (usize, usize)) -> Vec<(usize, usize)> {
+    fn get_positions_iterator(start: (usize, usize), end: (usize, usize)) -> impl Iterator<Item=(usize, usize)> {
 
         let x_diff= end.0 as i32 - start.0 as i32;
         let y_diff= end.1 as i32 - start.1 as i32;
@@ -177,20 +136,26 @@ impl Block {
         };
 
         let ratio: f32 = smaller_difference as f32/bigger_difference as f32;
-        let mut v = vec![];
-        for i in 1..=bigger_difference.abs(){
+
+
+        let mut i = 1;
+        std::iter::from_fn(move || 
+        {if i <= bigger_difference.abs(){
+            let current_i = i;
+            i += 1;
             if x_main {
-                v.push(((start.0 as i32 +i as i32*x_diff_sign as i32) as usize, (start.1 as i32 + (i as f32*y_diff_sign as f32 *ratio)as i32) as usize)); // yield here
+                Some(((start.0 as i32 +current_i*x_diff_sign) as usize, (start.1 as i32 + (current_i as f32*y_diff_sign as f32 *ratio)as i32) as usize)) // yield here
             } else {
-                v.push(((start.0 as i32 + (i as f32*x_diff_sign as f32 *ratio)as i32) as usize, start.1+i as usize*y_diff_sign as usize)); // yield here
+                Some(((start.0 as i32 + (current_i as f32*x_diff_sign as f32 *ratio)as i32) as usize, start.1+current_i as usize*y_diff_sign as usize)) // yield here
             }
-        }
-        v
+        } else {
+            None
+        }})
     }
 
-    fn velocity_based_move(&self, map: &mut [Vec<Option<Block>>], y: usize, x: usize, frame_parity: bool) -> bool {
+    fn velocity_based_move(&self, map: &mut [Vec<Option<Block>>], y: usize, x: usize, _frame_parity: bool) -> bool {
         let desired_position = (x + self.velocity_x as usize, y + self.velocity_y as usize);
-        return(self.long_move(map, (x, y), desired_position));
+        self.long_move(map, (x, y), desired_position)
     }
 
     fn long_move(&self, map: &mut [Vec<Option<Block>>], current_position: (usize, usize), desired_position: (usize, usize)) -> bool{
@@ -223,8 +188,8 @@ impl Block {
             }
 
             for direction in move_group {
-                if Self::try_simple_move(&self, map, direction,  (x,y)) {
-                    return();
+                if Self::try_simple_move(self, map, direction,  (x,y)) {
+                    return;
                 }
             }
 
@@ -242,9 +207,9 @@ impl Block {
 
         // if the move is a slide, use sliding speed and do a long move
         if y_new == current_y && self.block_kind.sliding_speed() > 0 {
-            x_new = current_x as usize +(direction.0 as i32 * self.block_kind.sliding_speed() as i32) as usize;
+            x_new = current_x +(direction.0 as i32 * self.block_kind.sliding_speed() as i32) as usize;
             Self::long_move(self, map, (current_x, current_y), (x_new, y_new));
-            return(true);
+            return true
         }
 
         let new_cell = Block::get_cell(map, x_new, y_new);
@@ -292,7 +257,7 @@ impl Block {
 // returns true if position is valid and empty
 fn position_is_empty((x,y): (usize, usize), map: &[Vec<Option<Block>>]) -> bool {
     if y < GRID_HEIGHT && x < GRID_WIDTH && y > 0 && x > 0 {
-        match map[y as usize][x as usize] {
+        match map[y][x] {
             None => true,
             _ => false
         }
@@ -349,18 +314,18 @@ impl Model {
             let mut inner = Vec::new();
             for _ in 0..GRID_WIDTH {
                 match (rand::random::<f32>() * 100.0) as i32 {
-                    // 0..=15 => {
-                    //     inner.push(Some(Block::new(BlockKind::Concrete)));
-                    // }
-                    // 40..=40 => {
-                    //     inner.push(Some(Block::new(BlockKind::Steel)));
-                    // }
-                    // 50..=64 => {
-                    //     inner.push(Some(Block::new(BlockKind::Sand)));
-                    // }
-                    // 65..=80 => {
-                    //     inner.push(Some(Block::new(BlockKind::Water)));
-                    // }
+                    0..=15 => {
+                        inner.push(Some(Block::new(BlockKind::Concrete)));
+                    }
+                    40..=40 => {
+                        inner.push(Some(Block::new(BlockKind::Steel)));
+                    }
+                    50..=64 => {
+                        inner.push(Some(Block::new(BlockKind::Sand)));
+                    }
+                    65..=80 => {
+                        inner.push(Some(Block::new(BlockKind::Water)));
+                    }
                     _ => {
                         inner.push(None);
                     }
@@ -378,7 +343,6 @@ impl Model {
             pressed_right: false,
             current_mouse_position: vec2(0.0, 0.0),
             frame_parity: false,
-            current_block_kind: Some(Block::new(BlockKind::Sand)),
             fps: FPSCounter::new(),
             fps_result: 0,
         }
@@ -395,7 +359,7 @@ impl Model {
                     let current_block = self.map[i][j];
                     match current_block {
                         None => {}
-                        Some(mut block) => (&mut block).update(&mut self.map, j, i, self.frame_parity),
+                        Some(mut block) => block.update(&mut self.map, j, i, self.frame_parity),
                     }
                 }
             } else {
@@ -403,7 +367,7 @@ impl Model {
                     let current_block = self.map[i][j];
                     match current_block {
                         None => {}
-                        Some(mut block) => (&mut block).update(&mut self.map, j, i, self.frame_parity),
+                        Some(mut block) => block.update(&mut self.map, j, i, self.frame_parity),
                     }
                 }
             }
@@ -424,7 +388,6 @@ fn process_mouse(model: &mut Model) {
 
 fn brush(model: &mut Model, kind: BlockKind) {
     let size: u32 = PAINTBRUSH_SIZE;
-    // let size = 1;
     for r in 0..size {
         for i in 0..720 {
             let x = r as f32 * (i as f32 * PI / 360.0).cos();
@@ -476,7 +439,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
     let texture = wgpu::Texture::from_image(app, &DynamicImage::ImageRgb8(img));
     draw.texture(&texture);
-    draw_paintbrush(&draw, &model);
+    draw_paintbrush(&draw, model);
     draw.text(model.fps_result.to_string().as_str());
     draw.to_frame(app, &frame).unwrap();
 }
