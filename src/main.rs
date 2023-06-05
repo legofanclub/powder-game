@@ -2,6 +2,7 @@ use fps_counter::FPSCounter;
 use image::{Rgb, RgbImage};
 use nannou::image::{self, DynamicImage};
 use nannou::prelude::*;
+use nannou_egui::{self, egui, Egui};
 
 const SCALE: f32 = 2.0;
 const GRID_HEIGHT: usize = (150.0 * SCALE) as usize;
@@ -32,6 +33,17 @@ struct Model {
     frame_parity: bool,
     fps: FPSCounter,
     fps_result: usize,
+    egui: Egui,
+    settings: Settings,
+}
+
+struct Settings {
+    brush_size: u32,
+    fill_type: BlockKind,
+    scale: f32,
+    rotation: f32,
+    color: Srgb<u8>,
+    position: Vec2,
 }
 
 use nannou::rand;
@@ -44,29 +56,57 @@ struct Block {
     life_time: i8,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 enum BlockKind {
     Concrete,
     Steel,
     Sand,
     Water,
+    Wood,
+    Fire,
 }
 
 impl Block {
     fn new(block_kind: BlockKind) -> Self {
-        Block {
-            block_kind,
-            velocity_x: 0,
-            velocity_y: 0,
-            life_time: -1,
+        match block_kind {
+            BlockKind::Fire => Block {
+                block_kind,
+                velocity_x: 0,
+                velocity_y: 0,
+                life_time: 60,
+            },
+            _ => Block {
+                block_kind,
+                velocity_x: 0,
+                velocity_y: 0,
+                life_time: -1,
+            }
         }
     }
+
 }
 
 impl Block {
     fn update(&mut self, map: &mut [Vec<Option<Block>>], x: usize, y: usize, frame_parity: bool) {
         self.update_block_velocity(map, y, x);
         self.move_block(map, y, x, frame_parity);
+        self.handle_lifecycle(map, y, x);
+    }
+
+    fn handle_lifecycle(&self, map: &mut [Vec<Option<Block>>], y: usize, x: usize) {
+        if !self.block_kind.has_lifecycle() {
+            return();
+        }
+
+
+
+        map[y][x].unwrap().life_time -= 1;
+
+        println!("{}", map[y][x].unwrap().life_time);
+        if map[y][x].unwrap().life_time < 1 {
+            println!("removed block");
+            map[y][x] = None;
+        }
     }
 
     fn update_block_velocity(&mut self, map: &mut [Vec<Option<Block>>], y: usize, x: usize) {
@@ -99,6 +139,10 @@ impl Block {
     }
 
     fn move_block(&self, map: &mut [Vec<Option<Block>>], y: usize, x: usize, frame_parity: bool) {
+        if !self.block_kind.affected_by_gravity(){
+            return();
+        }
+
         if !Self::velocity_based_move(self, map, y, x, frame_parity) {
             // make a simple move if the velocity based move doesn't change the position of the block
             Self::simple_rules_move(self, map, (x,y), frame_parity);
@@ -107,7 +151,6 @@ impl Block {
         }
     }
 
-    // could return an iterator for performance gains
     fn get_positions_iterator(start: (usize, usize), end: (usize, usize)) -> impl Iterator<Item=(usize, usize)> {
 
         let x_diff= end.0 as i32 - start.0 as i32;
@@ -273,7 +316,8 @@ impl BlockKind {
             BlockKind::Steel => 5,
             BlockKind::Sand => 3,
             BlockKind::Water => 2,
-            // _ => 0,
+            BlockKind::Wood => 1,
+            BlockKind::Fire => 0,
         }
     }
 
@@ -283,6 +327,8 @@ impl BlockKind {
             BlockKind::Steel => Rgb([208, 212, 214]),
             BlockKind::Sand => Rgb([194, 178, 128]),
             BlockKind::Water => Rgb([0, 0, 255]),
+            BlockKind::Wood => Rgb([58, 29, 0]),
+            BlockKind::Fire => Rgb([255, 0, 0]),
         }
     }
 
@@ -292,6 +338,8 @@ impl BlockKind {
             BlockKind::Steel => 0,
             BlockKind::Sand => 0,
             BlockKind::Water => 15,
+            BlockKind::Wood => 0,
+            BlockKind::Fire => 0,
         }
     }
     
@@ -303,8 +351,34 @@ impl BlockKind {
             BlockKind::Steel => vec![],
             BlockKind::Sand => vec![vec![DOWN], vec![DOWN_LEFT, DOWN_RIGHT]],
             BlockKind::Water => vec![vec![DOWN], vec![DOWN_LEFT, DOWN_RIGHT], vec![LEFT, RIGHT]],
+            BlockKind::Wood => vec![],
+            BlockKind::Fire => vec![],
+            // BlockKind::Fire => vec![vec![UP], vec![UP_LEFT, UP_RIGHT], vec![LEFT, RIGHT]],
         }
     }
+
+    fn affected_by_gravity(&self) -> bool {
+        match self {
+            BlockKind::Concrete => true,
+            BlockKind::Steel => false,
+            BlockKind::Sand => true,
+            BlockKind::Water => true,
+            BlockKind::Wood => false,
+            BlockKind::Fire => false,
+        }
+    }
+
+    fn has_lifecycle(&self) -> bool {
+        match self {
+            BlockKind::Concrete => false,
+            BlockKind::Steel => false,
+            BlockKind::Sand => false,
+            BlockKind::Water => false,
+            BlockKind::Wood => false,
+            BlockKind::Fire => true,
+        }
+    }
+
 }
 
 impl Model {
@@ -314,18 +388,18 @@ impl Model {
             let mut inner = Vec::new();
             for _ in 0..GRID_WIDTH {
                 match (rand::random::<f32>() * 100.0) as i32 {
-                    0..=15 => {
-                        inner.push(Some(Block::new(BlockKind::Concrete)));
-                    }
-                    40..=40 => {
-                        inner.push(Some(Block::new(BlockKind::Steel)));
-                    }
-                    50..=64 => {
-                        inner.push(Some(Block::new(BlockKind::Sand)));
-                    }
-                    65..=80 => {
-                        inner.push(Some(Block::new(BlockKind::Water)));
-                    }
+                    // 0..=15 => {
+                    //     inner.push(Some(Block::new(BlockKind::Concrete)));
+                    // }
+                    // 40..=40 => {
+                    //     inner.push(Some(Block::new(BlockKind::Steel)));
+                    // }
+                    // 50..=64 => {
+                    //     inner.push(Some(Block::new(BlockKind::Sand)));
+                    // }
+                    // 65..=80 => {
+                    //     inner.push(Some(Block::new(BlockKind::Water)));
+                    // }
                     _ => {
                         inner.push(None);
                     }
@@ -336,7 +410,8 @@ impl Model {
         outer
     }
 
-    fn new() -> Self {
+    fn new(egui: Egui) -> Self {
+
         Self {
             map: Self::new_map(),
             pressed_left: false,
@@ -345,11 +420,42 @@ impl Model {
             frame_parity: false,
             fps: FPSCounter::new(),
             fps_result: 0,
+            egui,
+            settings: Settings {
+                brush_size: 10,
+                fill_type: BlockKind::Sand,
+                scale: 200.0,
+                rotation: 0.0,
+                color: WHITE,
+                position: vec2(0.0, 0.0),
+            },
         }
     }
 
     fn update(&mut self) {
-        process_mouse(self);
+        // process_mouse(self);
+
+        let egui = &mut self.egui;
+        let ctx = egui.begin_frame();
+
+        egui::Window::new("Settings").show(&ctx, |ui| {
+            // brush size slider
+            ui.label("Brush Size:");
+            ui.add(egui::Slider::new(&mut self.settings.brush_size, 1..=40));
+    
+            // dropdown to select material type
+            egui::ComboBox::from_label( "Select one!")
+            .selected_text(format!("{:?}", self.settings.fill_type))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.settings.fill_type, BlockKind::Sand, "Sand");
+                ui.selectable_value(&mut self.settings.fill_type, BlockKind::Water, "Water");
+                ui.selectable_value(&mut self.settings.fill_type, BlockKind::Concrete, "Concrete");
+                ui.selectable_value(&mut self.settings.fill_type, BlockKind::Steel, "Steel");
+                ui.selectable_value(&mut self.settings.fill_type, BlockKind::Wood, "Wood");
+                ui.selectable_value(&mut self.settings.fill_type, BlockKind::Fire, "Fire");
+            }
+            );
+        });
 
         for i in (0..self.map.len() - 1).rev() {
 
@@ -380,14 +486,12 @@ impl Model {
 
 fn process_mouse(model: &mut Model) {
     if model.pressed_left {
-        brush(model, BlockKind::Sand);
-    } else if model.pressed_right {
-        brush(model, BlockKind::Water)
+        brush(model, model.settings.fill_type);
     }
 }
 
 fn brush(model: &mut Model, kind: BlockKind) {
-    let size: u32 = PAINTBRUSH_SIZE;
+    let size: u32 = model.settings.brush_size;
     for r in 0..size {
         for i in 0..720 {
             let x = r as f32 * (i as f32 * PI / 360.0).cos();
@@ -407,13 +511,27 @@ fn main() {
 }
 
 fn model(app: &App) -> Model {
-    app.new_window()
+    let window_id = app.new_window()
         .size(WIDTH, HEIGHT)
         .event(event)
+        .raw_event(raw_window_event)
         .view(view)
         .build()
         .unwrap();
-    Model::new()
+
+    // let window_id = app
+    // .new_window()
+    // .view(view)
+    // .build()
+    // .unwrap();
+    let window = app.window(window_id).unwrap();
+    let egui = Egui::from_window(&window);
+    Model::new(egui)
+}
+
+fn raw_window_event(_app: &App, model: &mut Model, event: &nannou::winit::event::WindowEvent) {
+    // Let egui handle things like keyboard and mouse input.
+    model.egui.handle_raw_event(event);
 }
 
 fn update(_app: &App, model: &mut Model, _update: Update) {
@@ -442,10 +560,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
     draw_paintbrush(&draw, model);
     draw.text(model.fps_result.to_string().as_str());
     draw.to_frame(app, &frame).unwrap();
+    model.egui.draw_to_frame(&frame).unwrap();
 }
 
 fn draw_paintbrush(draw: &Draw, model: &Model) {
-    let r: u32 = PAINTBRUSH_SIZE * BLOCK_SIZE as u32;
+    let r: u32 = model.settings.brush_size * BLOCK_SIZE as u32;
     draw.ellipse()
         .color(WHITE)
         .no_fill()
@@ -474,9 +593,7 @@ fn event(_app: &App, model: &mut Model, event: WindowEvent) {
         MouseMoved(pos) => {
             model.current_mouse_position = pos;
             if model.pressed_left {
-                brush(model, BlockKind::Sand);
-            } else if model.pressed_right {
-                brush(model, BlockKind::Water)
+                brush(model, model.settings.fill_type);
             }
         }
         MousePressed(button) => match button {
