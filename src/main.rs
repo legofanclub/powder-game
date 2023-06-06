@@ -8,8 +8,8 @@ const SCALE: f32 = 2.0;
 const GRID_HEIGHT: usize = (150.0 * SCALE) as usize;
 const GRID_WIDTH: usize = (267.0 * SCALE) as usize;
 const BLOCK_SIZE: usize = 2;
-const HEIGHT: u32 = (GRID_HEIGHT * BLOCK_SIZE) as u32;
-const WIDTH: u32 = (GRID_WIDTH * BLOCK_SIZE) as u32;
+const SCREEN_HEIGHT: u32 = (GRID_HEIGHT * BLOCK_SIZE) as u32;
+const SCREEN_WIDTH: u32 = (GRID_WIDTH * BLOCK_SIZE) as u32;
 
 // const UP: (i8, i8) = (0, -1);
 const DOWN: (i8, i8) = (0, 1);
@@ -20,14 +20,11 @@ const RIGHT: (i8, i8) = (1, 0);
 const DOWN_LEFT: (i8, i8) = (-1, 1);
 const DOWN_RIGHT: (i8, i8) = (1, 1);
 
-const PAINTBRUSH_SIZE: u32 = 3;
-
 const ACCELERATION_DUE_TO_GRAVITY: i8 = 1;
 
 struct Model {
     map: Vec<Vec<Option<Block>>>,
     pressed_left: bool,
-    pressed_right: bool,
     current_mouse_position: Vec2,
     frame_parity: bool,
     fps: FPSCounter,
@@ -39,10 +36,6 @@ struct Model {
 struct Settings {
     brush_size: u32,
     fill_type: BlockKind,
-    scale: f32,
-    rotation: f32,
-    color: Srgb<u8>,
-    position: Vec2,
 }
 
 use nannou::rand::{self, Rng};
@@ -91,22 +84,8 @@ impl Block {
         self.handle_lifecycle(map, y, x);
     }
 
-    fn handle_lifecycle(&mut self, map: &mut [Vec<Option<Block>>], y: usize, x: usize) {
-        if !self.block_kind.has_lifecycle() {
-            return ();
-        }
-
-        map[y][x].as_mut().unwrap().life_time -= 1;
-
-        // println!("{}", map[y][x].unwrap().);
-        if self.life_time < 1 {
-            map[y][x] = None;
-        }
-    }
-
     fn update_block_velocity(&mut self, map: &mut [Vec<Option<Block>>], y: usize, x: usize) {
         if (self.velocity_y as i32 + ACCELERATION_DUE_TO_GRAVITY as i32) < 127 {
-            // self.velocity_y += ACCELERATION_DUE_TO_GRAVITY;
             map[y][x].as_mut().unwrap().velocity_y +=
                 ACCELERATION_DUE_TO_GRAVITY * rand::thread_rng().gen_range(0..2);
         }
@@ -128,28 +107,54 @@ impl Block {
         }
     }
 
-    fn swap_cells(
-        map: &mut [Vec<Option<Block>>],
-        (x_1, y_1): (usize, usize),
-        (x_2, y_2): (usize, usize),
-    ) {
-        let temp = map[y_1][x_1];
-        map[y_1][x_1] = map[y_2][x_2];
-        map[y_2][x_2] = temp;
-    }
-
     fn move_block(&self, map: &mut [Vec<Option<Block>>], y: usize, x: usize, frame_parity: bool) {
         if !self.block_kind.affected_by_gravity() {
-            return ();
+            return;
         }
 
         if !self.velocity_based_move(map, y, x, frame_parity) {
             // make a simple move if the velocity based move doesn't change the position of the block
             self.simple_rules_move(map, (x, y), frame_parity);
-            // let up_or_side_moves = self.block_kind.directions_to_fall().iter().map(|v| v.iter().filter(|(x,y)| *x == 0 || *y == 0));
         }
     }
 
+    fn velocity_based_move(
+        &self,
+        map: &mut [Vec<Option<Block>>],
+        y: usize,
+        x: usize,
+        _frame_parity: bool,
+    ) -> bool {
+        let desired_position = (x + self.velocity_x as usize, y + self.velocity_y as usize);
+        self.long_move(map, (x, y), desired_position)
+    }
+
+    fn long_move(
+        &self,
+        map: &mut [Vec<Option<Block>>],
+        current_position: (usize, usize),
+        desired_position: (usize, usize),
+    ) -> bool {
+        let mut best_position = None;
+
+        for position in Self::get_positions_iterator(current_position, desired_position) {
+            if position_is_empty(position, map) {
+                best_position = Some(position);
+            } else {
+                // break on the closest invalid position or filled block
+                break;
+            }
+        }
+
+        if let Some(best_position) = best_position {
+            Self::swap_cells(map, current_position, best_position);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// iterator of coordinates in line from start coordinate to end coordinate
     fn get_positions_iterator(
         start: (usize, usize),
         end: (usize, usize),
@@ -191,13 +196,13 @@ impl Block {
                         (start.0 as i32 + current_i * x_diff_sign) as usize,
                         (start.1 as i32 + (current_i as f32 * y_diff_sign as f32 * ratio) as i32)
                             as usize,
-                    )) // yield here
+                    ))
                 } else {
                     Some((
                         (start.0 as i32 + (current_i as f32 * x_diff_sign as f32 * ratio) as i32)
                             as usize,
                         start.1 + current_i as usize * y_diff_sign as usize,
-                    )) // yield here
+                    ))
                 }
             } else {
                 None
@@ -205,42 +210,14 @@ impl Block {
         })
     }
 
-    fn velocity_based_move(
-        &self,
+    fn swap_cells(
         map: &mut [Vec<Option<Block>>],
-        y: usize,
-        x: usize,
-        _frame_parity: bool,
-    ) -> bool {
-        let desired_position = (x + self.velocity_x as usize, y + self.velocity_y as usize);
-        self.long_move(map, (x, y), desired_position)
-    }
-
-    fn long_move(
-        &self,
-        map: &mut [Vec<Option<Block>>],
-        current_position: (usize, usize),
-        desired_position: (usize, usize),
-    ) -> bool {
-        let mut best_position = None;
-
-        for position in Self::get_positions_iterator(current_position, desired_position) {
-            // use an iterator to generate this positions? (eg. next closest position)
-            // position_iterator(current, desired);
-            if position_is_empty(position, map) {
-                best_position = Some(position);
-            } else {
-                // break on the closest invalid position or filled block
-                break;
-            }
-        }
-
-        if best_position.is_some() {
-            Self::swap_cells(map, current_position, best_position.unwrap());
-            true
-        } else {
-            false
-        }
+        (x_1, y_1): (usize, usize),
+        (x_2, y_2): (usize, usize),
+    ) {
+        let temp = map[y_1][x_1];
+        map[y_1][x_1] = map[y_2][x_2];
+        map[y_2][x_2] = temp;
     }
 
     fn simple_rules_move(
@@ -295,6 +272,18 @@ impl Block {
         }
     }
 
+    fn handle_lifecycle(&mut self, map: &mut [Vec<Option<Block>>], y: usize, x: usize) {
+        if !self.block_kind.has_lifecycle() {
+            return;
+        }
+
+        map[y][x].as_mut().unwrap().life_time -= 1;
+
+        if self.life_time < 1 {
+            map[y][x] = None;
+        }
+    }
+
     fn draw(&self, x: usize, y: usize, img: &mut image::ImageBuffer<Rgb<u8>, Vec<u8>>) {
         let x = x;
         let y = y;
@@ -323,10 +312,7 @@ impl Block {
 // returns true if position is valid and empty
 fn position_is_empty((x, y): (usize, usize), map: &[Vec<Option<Block>>]) -> bool {
     if y < GRID_HEIGHT && x < GRID_WIDTH && y > 0 && x > 0 {
-        match map[y][x] {
-            None => true,
-            _ => false,
-        }
+        matches!(map[y][x], None)
     } else {
         false
     }
@@ -408,23 +394,23 @@ impl Model {
         for _ in 0..GRID_HEIGHT {
             let mut inner = Vec::new();
             for _ in 0..GRID_WIDTH {
-                match (rand::random::<f32>() * 100.0) as i32 {
-                    // 0..=15 => {
-                    //     inner.push(Some(Block::new(BlockKind::Concrete)));
-                    // }
-                    // 40..=40 => {
-                    //     inner.push(Some(Block::new(BlockKind::Steel)));
-                    // }
-                    // 50..=64 => {
-                    //     inner.push(Some(Block::new(BlockKind::Sand)));
-                    // }
-                    // 65..=80 => {
-                    //     inner.push(Some(Block::new(BlockKind::Water)));
-                    // }
-                    _ => {
-                        inner.push(None);
-                    }
-                }
+                // match (rand::random::<f32>() * 100.0) as i32 {
+                // 0..=15 => {
+                //     inner.push(Some(Block::new(BlockKind::Concrete)));
+                // }
+                // 40..=40 => {
+                //     inner.push(Some(Block::new(BlockKind::Steel)));
+                // }
+                // 50..=64 => {
+                //     inner.push(Some(Block::new(BlockKind::Sand)));
+                // }
+                // 65..=80 => {
+                //     inner.push(Some(Block::new(BlockKind::Water)));
+                // }
+                // _ => {
+                inner.push(None);
+                // }
+                // }
             }
             outer.push(inner);
         }
@@ -435,7 +421,6 @@ impl Model {
         Self {
             map: Self::new_map(),
             pressed_left: false,
-            pressed_right: false,
             current_mouse_position: vec2(0.0, 0.0),
             frame_parity: false,
             fps: FPSCounter::new(),
@@ -444,10 +429,6 @@ impl Model {
             settings: Settings {
                 brush_size: 4,
                 fill_type: BlockKind::Sand,
-                scale: 200.0,
-                rotation: 0.0,
-                color: WHITE,
-                position: vec2(0.0, 0.0),
             },
         }
     }
@@ -467,25 +448,21 @@ impl Model {
             // the if else block is to iterate from right to left and left to right on different frame parity
             if self.frame_parity {
                 for j in 0..self.map[0].len() {
-                    // is current_block a reference here?
                     let current_block = &mut self.map[i][j];
-                    // let current_block = &mut self.map[i][j];
+                    match current_block {
+                        None => {}
+                        Some(mut block) => block.update(&mut self.map, j, i, self.frame_parity),
+                    }
+                }
+            } else {
+                for j in (0..self.map[0].len()).rev() {
+                    let current_block = &mut self.map[i][j];
                     match current_block {
                         None => {}
                         Some(mut block) => block.update(&mut self.map, j, i, self.frame_parity),
                     }
                 }
             }
-
-            // else {
-            //     for j in (0..self.map[0].len()).rev() {
-            //         let current_block = self.map[i][j];
-            //         match current_block {
-            //             None => {}
-            //             Some(mut block) => block.update(&mut self.map, j, i, self.frame_parity),
-            //         }
-            //     }
-            // }
         }
     }
 
@@ -529,10 +506,11 @@ fn brush(model: &mut Model, kind: BlockKind) {
         for i in 0..720 {
             let x = r as f32 * (i as f32 * PI / 360.0).cos();
             let y = r as f32 * (i as f32 * PI / 360.0).sin();
-            model.map[(((-model.current_mouse_position[1] + (HEIGHT as f32 / 2.0)) as usize
+            model.map[(((-model.current_mouse_position[1] + (SCREEN_HEIGHT as f32 / 2.0)) as usize
                 / BLOCK_SIZE) as f32
                 + y) as usize][(((model.current_mouse_position[0]
-                + (WIDTH as f32 / 2.0)) as usize
+                + (SCREEN_WIDTH as f32 / 2.0))
+                as usize
                 / BLOCK_SIZE) as f32
                 + x) as usize] = Some(Block::new(kind));
         }
@@ -546,18 +524,13 @@ fn main() {
 fn model(app: &App) -> Model {
     let window_id = app
         .new_window()
-        .size(WIDTH, HEIGHT)
+        .size(SCREEN_WIDTH, SCREEN_HEIGHT)
         .event(event)
         .raw_event(raw_window_event)
         .view(view)
         .build()
         .unwrap();
 
-    // let window_id = app
-    // .new_window()
-    // .view(view)
-    // .build()
-    // .unwrap();
     let window = app.window(window_id).unwrap();
     let egui = Egui::from_window(&window);
     Model::new(egui)
@@ -576,7 +549,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
     frame.clear(PLUM);
     let draw = app.draw();
 
-    let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = RgbImage::new(WIDTH, HEIGHT);
+    let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = RgbImage::new(SCREEN_WIDTH, SCREEN_HEIGHT);
 
     for (i, row) in model.map.iter().enumerate() {
         for (j, block) in row.iter().enumerate() {
@@ -630,24 +603,16 @@ fn event(_app: &App, model: &mut Model, event: WindowEvent) {
                 brush(model, model.settings.fill_type);
             }
         }
-        MousePressed(button) => match button {
-            MouseButton::Left => {
+        MousePressed(button) => {
+            if button == MouseButton::Left {
                 model.pressed_left = true;
             }
-            MouseButton::Right => {
-                model.pressed_right = true;
-            }
-            _ => {}
-        },
-        MouseReleased(button) => match button {
-            MouseButton::Left => {
+        }
+        MouseReleased(button) => {
+            if button == MouseButton::Left {
                 model.pressed_left = false;
             }
-            MouseButton::Right => {
-                model.pressed_right = false;
-            }
-            _ => {}
-        },
+        }
         MouseWheel(_amount, _phase) => {}
         MouseEntered => {}
         MouseExited => {}
